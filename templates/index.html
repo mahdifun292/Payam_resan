@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>اتاق چت</title>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<style>
+  :root{
+    --bg:#0f172a; --panel:#1e293b; --panel2:#273449;
+    --accent:#38bdf8; --text:#e2e8f0; --muted:#94a3b8; --own:#0ea5e9;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:Tahoma,system-ui,sans-serif;background:var(--bg);color:var(--text);
+    height:100vh;overflow:hidden;
+  }
+  .hidden{display:none !important}
+
+  /* ---------- Login ---------- */
+  .overlay{
+    position:fixed;inset:0;background:rgba(15,23,42,.92);
+    display:flex;align-items:center;justify-content:center;z-index:50;
+  }
+  .card{
+    background:var(--panel);padding:28px;border-radius:16px;width:340px;
+    box-shadow:0 20px 50px rgba(0,0,0,.5);border:1px solid #334155;
+  }
+  .card h2,.card h3{margin-bottom:16px;text-align:center;font-size:18px}
+  .card input{
+    width:100%;padding:11px 13px;margin-bottom:10px;border-radius:9px;
+    border:1px solid #334155;background:#0f172a;color:var(--text);font-family:inherit;
+  }
+  .card input:focus{outline:none;border-color:var(--accent)}
+  .card button{
+    width:100%;padding:11px;border:none;border-radius:9px;cursor:pointer;
+    background:var(--accent);color:#062b3d;font-weight:bold;font-family:inherit;
+  }
+  .card button.ghost{background:transparent;color:var(--muted);border:1px solid #334155}
+  .card .row{display:flex;gap:8px}
+  .error{color:#f87171;font-size:12px;margin-top:8px;text-align:center;min-height:16px}
+
+  /* ---------- Layout ---------- */
+  #app{display:flex;height:100vh}
+  .sidebar{
+    width:260px;background:var(--panel);display:flex;flex-direction:column;
+    border-left:1px solid #334155;
+  }
+  .tabs{display:flex;border-bottom:1px solid #334155}
+  .tabs button{
+    flex:1;padding:12px;background:none;border:none;color:var(--muted);
+    cursor:pointer;font-family:inherit;font-size:14px;
+  }
+  .tabs button.active{color:var(--accent);border-bottom:2px solid var(--accent)}
+  .tab-body{flex:1;overflow-y:auto;padding:12px}
+  .tab-body h4{font-size:12px;color:var(--muted);margin:12px 0 6px;font-weight:normal}
+  .tab-body ul{list-style:none}
+  .tab-body li{
+    padding:9px 11px;border-radius:8px;cursor:pointer;font-size:14px;
+    margin-bottom:3px;display:flex;justify-content:space-between;align-items:center;
+    transition:background .15s;
+  }
+  .tab-body li:hover{background:var(--panel2)}
+  .tab-body li.active{background:var(--own);color:#04202e;font-weight:bold}
+  .tab-body li small{font-size:10px;opacity:.7}
+  .create-btn{
+    width:100%;margin-top:14px;padding:9px;border-radius:8px;cursor:pointer;
+    background:transparent;border:1px dashed #475569;color:var(--muted);font-family:inherit;
+  }
+  .create-btn:hover{border-color:var(--accent);color:var(--accent)}
+
+  /* ---------- Chat ---------- */
+  .chat{flex:1;display:flex;flex-direction:column;background:var(--bg)}
+  .chat header{
+    padding:15px 20px;background:var(--panel);border-bottom:1px solid #334155;
+  }
+  .chat header h3{font-size:16px}
+  .chat header span{font-size:12px;color:var(--muted)}
+  #messages{
+    flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:10px;
+  }
+  .msg{max-width:72%;padding:9px 13px;border-radius:13px;background:var(--panel);
+       font-size:14px;line-height:1.6;word-wrap:break-word}
+  .msg .meta{display:flex;gap:8px;font-size:11px;color:var(--muted);margin-bottom:3px}
+  .msg.own{align-self:flex-start;background:var(--own);color:#04202e}
+  .msg.own .meta{color:#06455e}
+  .msg.system{align-self:center;background:transparent;color:var(--muted);
+              font-size:12px;padding:2px}
+  #msgForm{display:flex;gap:10px;padding:14px 18px;background:var(--panel);
+           border-top:1px solid #334155}
+  #msgInput{
+    flex:1;padding:12px 15px;border-radius:11px;border:1px solid #334155;
+    background:#0f172a;color:var(--text);font-family:inherit;font-size:14px;
+  }
+  #msgInput:focus{outline:none;border-color:var(--accent)}
+  #sendBtn{
+    padding:0 22px;border:none;border-radius:11px;background:var(--accent);
+    color:#062b3d;font-weight:bold;cursor:pointer;font-family:inherit;
+  }
+  #sendBtn:disabled,#msgInput:disabled{opacity:.4;cursor:not-allowed}
+
+  .toast{
+    position:fixed;bottom:20px;left:20px;background:var(--panel2);
+    padding:12px 18px;border-radius:10px;font-size:13px;border:1px solid #475569;
+    animation:slide .25s;z-index:100;
+  }
+  @keyframes slide{from{transform:translateY(20px);opacity:0}}
+</style>
+</head>
+<body>
+
+<!-- ورود -->
+<div id="login" class="overlay">
+  <div class="card">
+    <h2>ورود به اتاق چت</h2>
+    <input id="usernameInput" placeholder="نام کاربری" maxlength="20" autofocus>
+    <button id="loginBtn">ورود</button>
+    <p id="loginError" class="error"></p>
+  </div>
+</div>
+
+<!-- اپلیکیشن -->
+<div id="app" class="hidden">
+  <aside class="sidebar">
+    <div class="tabs">
+      <button data-tab="rooms" class="active">اتاق‌ها</button>
+      <button data-tab="users">کاربران</button>
+    </div>
+
+    <div id="roomsTab" class="tab-body">
+      <h4>اتاق‌های عمومی</h4>
+      <ul id="publicRooms"></ul>
+      <h4>اتاق‌های خصوصی</h4>
+      <ul id="privateRooms"></ul>
+      <button id="createRoomBtn" class="create-btn">+ ساخت اتاق خصوصی</button>
+    </div>
+
+    <div id="usersTab" class="tab-body hidden">
+      <h4>کاربران آنلاین</h4>
+      <ul id="userList"></ul>
+    </div>
+  </aside>
+
+  <main class="chat">
+    <header>
+      <h3 id="roomTitle">یک اتاق انتخاب کنید</h3>
+      <span id="roomDesc"></span>
+    </header>
+    <div id="messages"></div>
+    <form id="msgForm">
+      <input id="msgInput" placeholder="پیام خود را بنویسید..." autocomplete="off" disabled>
+      <button type="submit" id="sendBtn" disabled>ارسال</button>
+    </form>
+  </main>
+</div>
+
+<!-- مودال ساخت اتاق -->
+<div id="modal" class="overlay hidden">
+  <div class="card">
+    <h3>ساخت اتاق خصوصی</h3>
+    <input id="newRoomName" placeholder="نام اتاق (انگلیسی)" maxlength="24">
+    <input id="newRoomDesc" placeholder="توضیح (اختیاری)">
+    <input id="newRoomPass" type="password" placeholder="رمز اتاق">
+    <div class="row">
+      <button id="confirmCreate">ساخت</button>
+      <button id="cancelCreate" class="ghost">انصراف</button>
+    </div>
+    <p id="createError" class="error"></p>
+  </div>
+</div>
+
+<script>
+const socket = io();
+let me = null, currentRoom = null, dmTarget = null;
+let pubData = [], privData = [];
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function toast(msg){
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+function scrollDown(){
+  const m = $('#messages');
+  m.scrollTop = m.scrollHeight;
+}
+
+/* ---------- ورود ---------- */
+$('#loginBtn').onclick = () => {
+  const name = $('#usernameInput').value.trim();
+  if (name) socket.emit('set_username', { username: name });
+};
+$('#usernameInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') $('#loginBtn').click();
+});
+
+socket.on('username_ok', ({ username }) => {
+  me = username;
+  $('#login').classList.add('hidden');
+  $('#app').classList.remove('hidden');
+});
+socket.on('login_error', ({ message }) => {
+  $('#loginError').textContent = message;
+});
+socket.on('error_msg', ({ message }) => toast(message));
+
+/* ---------- لیست اتاق‌ها ---------- */
+socket.on('rooms_list', d => {
+  pubData = d.public;
+  privData = d.private;
+  renderRooms();
+});
+
+function renderRooms(){
+  const pl = $('#publicRooms');
+  pl.innerHTML = '';
+  pubData.forEach(r => {
+    const li = document.createElement('li');
+    li.textContent = '#' + r.name;
+    li.title = r.description;
+    if (currentRoom === r.name) li.classList.add('active');
+    li.onclick = () => socket.emit('join', { room: r.name, password: '' });
+    pl.appendChild(li);
+  });
+
+  const vl = $('#privateRooms');
+  vl.innerHTML = '';
+  if (!privData.length){
+    vl.innerHTML = '<li style="cursor:default;color:#64748b;font-size:12px">هنوز اتاقی ساخته نشده</li>';
+  }
+  privData.forEach(r => {
+    const li = document.createElement('li');
+    li.innerHTML = `<span>🔒 ${esc(r.name)}</span><small>${esc(r.owner)}</small>`;
+    if (currentRoom === r.name) li.classList.add('active');
+    li.onclick = () => {
+      const pass = prompt('رمز اتاق «' + r.name + '» را وارد کنید:');
+      if (pass !== null) socket.emit('join', { room: r.name, password: pass });
+    };
+    vl.appendChild(li);
+  });
+}
+
+/* ---------- پیوستن به اتاق ---------- */
+socket.on('joined', data => {
+  currentRoom = data.room;
+  dmTarget = data.dm_target || null;
+  $('#roomTitle').textContent = data.title;
+  $('#roomDesc').textContent = data.description || '';
+  $('#msgInput').disabled = false;
+  $('#sendBtn').disabled = false;
+  $('#messages').innerHTML = '';
+  (data.history || []).forEach(m => addMessage({ ...m, room: data.room }, false));
+  scrollDown();
+  renderRooms();
+  $('#msgInput').focus();
+});
+
+socket.on('room_created', ({ room }) => {
+  $('#modal').classList.add('hidden');
+  socket.emit('join', { room, password: $('#newRoomPass').value });
+});
+
+/* ---------- پیام‌ها ---------- */
+socket.on('message', m => {
+  if (m.room === currentRoom){
+    addMessage(m);
+    scrollDown();
+  } else if (m.room && m.room.startsWith('dm:')){
+    toast(`پیام خصوصی از ${m.username}: ${m.text}`);
+  }
+});
+
+function addMessage(m){
+  const div = document.createElement('div');
+  if (m.system){
+    div.className = 'msg system';
+    div.textContent = m.text;
+  } else {
+    div.className = 'msg' + (m.username === me ? ' own' : '');
+    div.innerHTML =
+      `<div class="meta"><b>${esc(m.username)}</b><span>${esc(m.time)}</span></div>` +
+      `<div class="text">${esc(m.text)}</div>`;
+  }
+  $('#messages').appendChild(div);
+}
+
+/* ---------- ارسال ---------- */
+$('#msgForm').onsubmit = e => {
+  e.preventDefault();
+  const text = $('#msgInput').value.trim();
+  if (!text) return;
+  if (dmTarget) socket.emit('send_dm', { target: dmTarget, text });
+  else          socket.emit('send_message', { text });
+  $('#msgInput').value = '';
+  $('#msgInput').focus();
+};
+
+/* ---------- کاربران ---------- */
+socket.on('user_list', ({ users }) => {
+  const ul = $('#userList');
+  ul.innerHTML = '';
+  users.filter(u => u !== me).forEach(u => {
+    const li = document.createElement('li');
+    li.innerHTML = `<span>🟢 ${esc(u)}</span><small>پیام خصوصی</small>`;
+    li.onclick = () => socket.emit('open_dm', { target: u });
+    ul.appendChild(li);
+  });
+  if (!ul.children.length)
+    ul.innerHTML = '<li style="cursor:default;color:#64748b;font-size:12px">کاربر دیگری آنلاین نیست</li>';
+});
+
+socket.on('room_users', ({ room, users }) => {
+  if (room === currentRoom)
+    $('#roomDesc').textContent = `${users.length} نفر در اتاق`;
+});
+
+/* ---------- تب‌ها ---------- */
+document.querySelectorAll('.tabs button').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const isRooms = btn.dataset.tab === 'rooms';
+    $('#roomsTab').classList.toggle('hidden', !isRooms);
+    $('#usersTab').classList.toggle('hidden', isRooms);
+  };
+});
+
+/* ---------- مودال ---------- */
+$('#createRoomBtn').onclick = () => {
+  $('#createError').textContent = '';
+  $('#newRoomName').value = $('#newRoomDesc').value = $('#newRoomPass').value = '';
+  $('#modal').classList.remove('hidden');
+};
+$('#cancelCreate').onclick = () => $('#modal').classList.add('hidden');
+$('#confirmCreate').onclick = () => {
+  socket.emit('create_room', {
+    name: $('#newRoomName').value,
+    description: $('#newRoomDesc').value,
+    password: $('#newRoomPass').value
+  });
+};
+</script>
+</body>
+</html>
